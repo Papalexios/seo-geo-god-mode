@@ -1145,19 +1145,29 @@ export class MaintenanceEngine {
         }
 
         // 7. VALIDATE & ADD REFERENCES (if missing)
-        this.logCallback(`📚 CHECKING: References section...`);
+        this.logCallback(`📚 ═══════════════════════════════════════`);
+        this.logCallback(`📚 STARTING: Reference validation check...`);
 
-        const existingReferencesSection = body.querySelector('.sota-references-section, .references-section, .sources-section') ||
-                                        Array.from(body.querySelectorAll('h2, h3')).find(h => {
-                                            const text = h.textContent?.toLowerCase() || '';
-                                            return (text.includes('reference') || text.includes('sources') || text.includes('further reading')) &&
-                                                   !text.includes('code') && !text.includes('manual');
-                                        });
+        const referenceSectionClass = body.querySelector('.sota-references-section, .references-section, .sources-section');
+        const referenceHeadings = Array.from(body.querySelectorAll('h2, h3')).filter(h => {
+            const text = h.textContent?.toLowerCase() || '';
+            return (text.includes('reference') || text.includes('sources') || text.includes('further reading')) &&
+                   !text.includes('code') && !text.includes('manual');
+        });
 
-        const hasReferences = !!existingReferencesSection;
+        this.logCallback(`📚 CLASS CHECK: ${referenceSectionClass ? '✓ Found reference section class' : '✗ No reference section class'}`);
+        this.logCallback(`📚 HEADING CHECK: ${referenceHeadings.length > 0 ? `✓ Found ${referenceHeadings.length} reference heading(s)` : '✗ No reference headings'}`);
+        if (referenceHeadings.length > 0) {
+            referenceHeadings.forEach(h => this.logCallback(`   - "${h.textContent}"`));
+        }
 
-        this.logCallback(`📚 REFERENCES STATUS: ${hasReferences ? 'Already present' : 'Missing - will add'}`);
-        this.logCallback(`📚 SERPER API: ${serperApiKey ? 'Configured ✓' : 'NOT configured ✗'}`);
+        const hasReferences = !!(referenceSectionClass || referenceHeadings.length > 0);
+
+        this.logCallback(`📚 ═══════════════════════════════════════`);
+        this.logCallback(`📚 FINAL DECISION: ${hasReferences ? '❌ SKIP (Already present)' : '✅ ADD REFERENCES'}`);
+        this.logCallback(`📚 SERPER API KEY: ${serperApiKey ? '✅ CONFIGURED' : '❌ NOT CONFIGURED'}`);
+        this.logCallback(`📚 WILL ADD REFERENCES: ${!hasReferences && serperApiKey ? '✅ YES' : '❌ NO'}`);
+        this.logCallback(`📚 ═══════════════════════════════════════`);
 
         if (!hasReferences && serperApiKey) {
             this.logCallback(`🔍 SEARCHING: High-quality reference sources with Serper API...`);
@@ -1266,7 +1276,57 @@ export class MaintenanceEngine {
             this.logCallback(`❌ Please add your Serper API key in settings to enable reference generation`);
         }
 
-        // 8. RESTORE PROTECTED CONTENT & PUBLISH
+        // 8. OPTIMIZE ALL IMAGE ALT TEXT
+        this.logCallback(`🖼️ CHECKING: Image alt text optimization...`);
+        const allImages = Array.from(body.querySelectorAll('img'));
+        const imagesToOptimize = allImages.filter(img => {
+            const alt = img.getAttribute('alt') || '';
+            return !alt || alt.length < 10 || alt === 'image' || alt === 'photo' || alt === 'picture';
+        });
+
+        if (imagesToOptimize.length > 0) {
+            this.logCallback(`🔧 OPTIMIZING: ${imagesToOptimize.length} images with poor/missing alt text...`);
+            try {
+                const imageDataForAI = imagesToOptimize.slice(0, 10).map(img => {
+                    const src = img.getAttribute('src') || '';
+                    const currentAlt = img.getAttribute('alt') || 'MISSING';
+                    const parent = img.parentElement;
+                    const context = parent?.textContent?.substring(0, 150) || 'No surrounding context';
+                    return { src, currentAlt, context };
+                });
+
+                const altTextResponse = await memoizedCallAI(
+                    apiClients, selectedModel, geoTargeting, openrouterModels, selectedGroqModel,
+                    'optimize_image_alt_text',
+                    [imageDataForAI, page.title, page.title],
+                    'json'
+                );
+
+                const optimizedAltTexts = JSON.parse(altTextResponse);
+
+                let altTextUpdates = 0;
+                optimizedAltTexts.forEach((opt: any) => {
+                    if (opt.imageIndex < imagesToOptimize.length) {
+                        const img = imagesToOptimize[opt.imageIndex];
+                        if (opt.altText && opt.altText.length > 5) {
+                            img.setAttribute('alt', opt.altText);
+                            altTextUpdates++;
+                        }
+                    }
+                });
+
+                if (altTextUpdates > 0) {
+                    structuralFixesMade++;
+                    this.logCallback(`✅ OPTIMIZED: ${altTextUpdates} image alt texts (SEO + accessibility)` );
+                }
+            } catch (e: any) {
+                this.logCallback(`⚠️ Image alt text optimization failed: ${e.message}`);
+            }
+        } else if (allImages.length > 0) {
+            this.logCallback(`✅ IMAGE ALT TEXT: All ${allImages.length} images have good alt text`);
+        }
+
+        // 9. RESTORE PROTECTED CONTENT & PUBLISH
         const totalChanges = structuralFixesMade + textChangesMade + yearUpdatesCount + fluffRemovalCount;
 
         if (totalChanges > 0) {

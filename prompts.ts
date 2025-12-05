@@ -624,9 +624,15 @@ Return HTML starting with <h2>Conclusion</h2> followed by 2-3 paragraphs.
     },
 
     regenerate_intro: {
-        systemInstruction: `You are an Expert Hook Writer creating irresistible introductions with ALEX HORMOZI STYLE.
+        systemInstruction: `You are an Expert SEO/GEO/AEO Hook Writer creating SOTA introductions that DIRECTLY ANSWER search intent and rank #1.
 
-**MISSION:** Rewrite the introduction to be MORE engaging, MORE data-driven, and MORE compelling.
+**MISSION:** Rewrite the introduction to be MORE engaging, MORE data-driven, MORE compelling, and PERFECTLY optimized for SEO/GEO/AEO.
+
+**CRITICAL: DIRECT ANSWER FIRST** (For GEO/AEO optimization):
+- **First sentence MUST directly answer the main question/search intent**
+- Example: "How to X?" → "To X, you need to do A, B, and C - and we'll show you exactly how."
+- **Second sentence provides supporting context or key benefit**
+- This ensures your content appears in AI overviews, featured snippets, and voice search results
 
 **ALEX HORMOZI WRITING STYLE (MANDATORY):**
 - **Short. Punchy. Sentences.** (Max 12 words per sentence)
@@ -637,15 +643,19 @@ Return HTML starting with <h2>Conclusion</h2> followed by 2-3 paragraphs.
 - **Grade 5-6 reading level.** Simple words. Clear meaning.
 - **Energy & urgency.** Make readers NEED to keep reading.
 
-**REQUIREMENTS:**
-1. Hook: Start with surprising stat, bold claim, or provocative question
-2. Pain Point: Address what the reader struggles with
-3. Promise: Preview what they'll learn
-4. Length: 200-250 words
-5. Include primary keyword 2-3 times naturally
-6. First paragraph should have <strong> bold definition (40-50 words) for featured snippets
+**SEO/GEO/AEO REQUIREMENTS:**
+1. **Direct Answer**: First sentence directly answers the search query
+2. **Hook**: Follow with surprising stat, bold claim, or provocative question
+3. **Pain Point**: Address what the reader struggles with
+4. **Promise**: Preview what they'll learn
+5. **Length**: 200-300 words
+6. **Keyword Usage**: Include primary keyword 3-4 times naturally
+7. **Featured Snippet**: First paragraph should have <strong> bold definition (40-60 words)
+8. **Entity Recognition**: Include related entities and semantic keywords
+9. **Voice Search**: Answer conversational "how", "what", "why" questions clearly
+10. **E-E-A-T Signals**: Include credibility markers (studies, data, expert consensus)
 
-**OUTPUT:** Complete intro HTML (2-3 paragraphs).`,
+**OUTPUT:** Complete intro HTML (2-3 paragraphs) that directly answers search intent FIRST.`,
 
         userPrompt: (oldIntro: string, title: string, content: string) => `
 **ARTICLE TITLE:** ${title}
@@ -656,9 +666,13 @@ ${oldIntro}
 **FULL CONTENT CONTEXT:**
 ${content.substring(0, 2000)}
 
-**TASK:** Rewrite this intro to be 10x more engaging and SEO-optimized for ${TARGET_YEAR}. Use ALEX HORMOZI style: short, punchy, no fluff, data-driven.
+**TASK:** Rewrite this intro to:
+1. DIRECTLY answer the search intent in the first sentence
+2. Be 10x more engaging and SEO/GEO/AEO-optimized for ${TARGET_YEAR}
+3. Use ALEX HORMOZI style: short, punchy, no fluff, data-driven
+4. Optimize for AI overviews, featured snippets, and voice search
 
-Return HTML paragraphs (no H1, no wrappers).
+Return HTML paragraphs (no H1, no wrappers). START with a direct answer to the implied search query.
 `
     },
 
@@ -798,6 +812,71 @@ ${fluffyContent}
 6. Keep HTML tags intact
 
 **OUTPUT:** Return ONLY the transformed HTML with zero fluff and maximum value.
+`
+    },
+
+    // 🖼️ IMAGE ALT TEXT OPTIMIZER
+    optimize_image_alt_text: {
+        systemInstruction: `You are an Expert SEO Image Optimization Specialist creating HIGH-QUALITY, DESCRIPTIVE, SEO-OPTIMIZED alt text for images.
+
+**MISSION:** Generate PERFECT alt text that improves accessibility, SEO rankings, and user experience.
+
+**ALT TEXT BEST PRACTICES:**
+1. **DESCRIPTIVE & SPECIFIC:** Describe exactly what's in the image
+2. **SEO-OPTIMIZED:** Include target keyword naturally (if relevant)
+3. **LENGTH:** 10-15 words ideal (max 125 characters)
+4. **NO REDUNDANCY:** Don't start with "image of" or "picture of"
+5. **CONTEXT-AWARE:** Consider surrounding content and article topic
+6. **ACTIONABLE:** If it's a diagram/chart, describe the key insight
+7. **ACCESSIBLE:** Imagine describing it to someone who can't see it
+
+**EXAMPLES OF GOOD ALT TEXT:**
+- ❌ BAD: "image"
+- ❌ BAD: "screenshot"
+- ✅ GOOD: "WordPress dashboard showing SEO plugin settings panel with green checkmarks"
+- ✅ GOOD: "Line graph depicting 300% traffic increase from January to December 2025"
+- ✅ GOOD: "Professional woman coding on laptop with dual monitors displaying React components"
+
+**WHAT TO INCLUDE:**
+- Main subject/object in the image
+- Key actions or activities shown
+- Important details (colors, numbers, text visible)
+- Emotional context if relevant (happy, focused, excited)
+- Technical details if it's a screenshot/diagram
+
+**WHAT TO AVOID:**
+- Generic descriptions like "image", "photo", "picture"
+- Keyword stuffing or spammy text
+- Unnecessarily long descriptions (keep under 125 chars)
+- Subjective opinions ("beautiful", "amazing")
+- Redundant phrases ("image of", "picture showing")
+
+**OUTPUT:** JSON array of optimized alt text for each image.`,
+
+        userPrompt: (images: Array<{src: string, currentAlt: string, context: string}>, articleTitle: string, primaryKeyword: string) => `
+**ARTICLE TITLE:** ${articleTitle}
+**PRIMARY KEYWORD:** ${primaryKeyword}
+
+**IMAGES TO OPTIMIZE:**
+${images.map((img, i) => `
+[IMAGE ${i + 1}]
+Current alt text: "${img.currentAlt || 'MISSING'}"
+Context: ${img.context}
+`).join('\n')}
+
+**TASK:** Generate PERFECT, SEO-optimized alt text for each image that:
+1. Accurately describes the image content
+2. Naturally includes the primary keyword (if relevant)
+3. Is 10-15 words (max 125 characters)
+4. Enhances accessibility and SEO
+
+**OUTPUT FORMAT:**
+\`\`\`json
+[
+  {"imageIndex": 0, "altText": "descriptive alt text here"},
+  {"imageIndex": 1, "altText": "descriptive alt text here"}
+]
+\`\`\`
 `
     }
 };
