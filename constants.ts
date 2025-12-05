@@ -21,15 +21,16 @@ export const AI_MODELS = {
 };
 
 // ==========================================
-// CONTENT & SEO REQUIREMENTS (STRICT ENFORCEMENT)
+// CONTENT & SEO REQUIREMENTS (SOTA ULTRA QUALITY)
 // ==========================================
-export const TARGET_MIN_WORDS = 2200; // Strict Minimum
-export const TARGET_MAX_WORDS = 2800; // Strict Maximum
-export const TARGET_MIN_WORDS_PILLAR = 3500; 
-export const TARGET_MAX_WORDS_PILLAR = 4500;
+// Increased for MAXIMUM ranking power - comprehensive content dominates SERPs
+export const TARGET_MIN_WORDS = 2500; // SOTA Minimum for #1 Rankings
+export const TARGET_MAX_WORDS = 3200; // SOTA Maximum (more depth = more authority)
+export const TARGET_MIN_WORDS_PILLAR = 4000; // Pillar content needs even more depth
+export const TARGET_MAX_WORDS_PILLAR = 5500;
 export const YOUTUBE_EMBED_COUNT = 2;
-export const MIN_INTERNAL_LINKS = 6;
-export const MAX_INTERNAL_LINKS = 12;
+export const MIN_INTERNAL_LINKS = 8; // Increased for better topic clustering
+export const MAX_INTERNAL_LINKS = 15; // More internal linking = better SEO
 export const MIN_TABLES = 3;
 export const FAQ_COUNT = 8;
 export const KEY_TAKEAWAYS = 8;

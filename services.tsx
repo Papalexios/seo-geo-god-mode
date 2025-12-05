@@ -597,99 +597,153 @@ export class MaintenanceEngine {
         return candidates.sort((a, b) => (b.daysOld || 0) - (a.daysOld || 0)); 
     }
 
-    // 🚀 NEW: DOM-BASED OPTIMIZER (Prevents HTML Distortion)
+    // 🚀 ULTRA GOD MODE: INTELLIGENT SURGICAL OPTIMIZER
     private async optimizeDOMSurgically(page: SitemapPage, context: GenerationContext) {
-        const { wpConfig, apiClients, selectedModel, geoTargeting, openrouterModels, selectedGroqModel } = context;
-        this.logCallback(`📥 Fetching LIVE content for: ${page.title}...`);
-        
+        const { wpConfig, apiClients, selectedModel, geoTargeting, openrouterModels, selectedGroqModel, serperApiKey } = context;
+        this.logCallback(`🎯 Target: ${page.title} | Age: ${page.daysOld || 'Unknown'} days`);
+
         let rawContent = await this.fetchRawContent(page, wpConfig);
         if (!rawContent || rawContent.length < 300) {
             this.logCallback(`❌ Content too short (${rawContent?.length || 0} chars). Skipping.`);
-            localStorage.setItem(`sota_last_proc_${page.id}`, Date.now().toString()); 
+            localStorage.setItem(`sota_last_proc_${page.id}`, Date.now().toString());
             return;
         }
 
-        // 1. PARSE HTML
+        // 1. INTELLIGENT PRE-ANALYSIS - Determine if update is actually needed
+        this.logCallback(`🔬 Running pre-analysis scan...`);
+        const needsUpdate = this.intelligentUpdateCheck(rawContent, page);
+
+        if (!needsUpdate.shouldUpdate) {
+            this.logCallback(`✅ Content fresh. Reason: ${needsUpdate.reason}. Skipping.`);
+            localStorage.setItem(`sota_last_proc_${page.id}`, Date.now().toString());
+            return;
+        }
+
+        this.logCallback(`⚡ Update justified: ${needsUpdate.reason}`);
+
+        // 2. PARSE HTML
         const parser = new DOMParser();
         const doc = parser.parseFromString(rawContent, 'text/html');
         const body = doc.body;
 
-        // SOTA: ALWAYS FORCE SCHEMA INJECTION IF MISSING
+        // 3. SCHEMA INJECTION (SOTA Enhancement)
         const hasSchema = rawContent.includes('application/ld+json');
         let schemaInjected = false;
         if (!hasSchema) {
-            this.logCallback("🔍 No Schema detected. Injecting High-Performance Schema...");
+            this.logCallback("📊 Injecting structured data schema...");
             const schemaMarkup = generateSchemaMarkup(
                 generateFullSchema(normalizeGeneratedContent({}, page.title), wpConfig, context.siteInfo)
             );
+            const schemaScript = doc.createElement('script');
+            schemaScript.type = 'application/ld+json';
+            schemaScript.textContent = schemaMarkup.match(/<script[^>]*>([\s\S]*?)<\/script>/)?.[1] || '';
+            body.appendChild(schemaScript);
             schemaInjected = true;
         }
 
-        // 2. IDENTIFY TEXT NODES (Paragraphs, Lists, Headers)
+        // 4. INTELLIGENT NODE SELECTION (Priority-Based)
         const textNodes = Array.from(body.querySelectorAll('p, li, h2, h3, h4'));
-        const safeNodes = textNodes.filter(node => {
-            if (node.closest('figure')) return false; 
-            if (node.querySelector('img, iframe, video')) return false; 
-            if (node.className.includes('wp-block-image')) return false;
-            if (node.textContent?.trim().length === 0) return false;
-            return true;
+        const priorityNodes = textNodes.filter(node => {
+            if (node.closest('figure, .wp-block-image, .wp-block-embed')) return false;
+            if (node.querySelector('img, iframe, video, svg')) return false;
+            if (node.textContent?.trim().length < 20) return false; // Skip tiny fragments
+
+            const text = node.textContent?.toLowerCase() || '';
+            const priority =
+                text.includes('2023') || text.includes('2024') ? 10 : // Outdated dates = high priority
+                node.tagName === 'H2' || node.tagName === 'H3' ? 8 : // Headers = high value
+                text.length > 200 ? 6 : // Long paragraphs = good targets
+                3; // Default priority
+
+            return priority >= 5; // Only process high-priority nodes
         });
 
-        const BATCH_SIZE = 3; 
-        let changesMade = 0;
-        const MAX_BATCHES = 15; 
+        this.logCallback(`📍 Identified ${priorityNodes.length} high-priority nodes for enhancement`);
 
-        for (let i = 0; i < Math.min(safeNodes.length, MAX_BATCHES * BATCH_SIZE); i += BATCH_SIZE) {
-            const batch = safeNodes.slice(i, i + BATCH_SIZE);
+        // 5. FETCH SEMANTIC KEYWORDS FOR CONTEXT
+        let semanticKeywords: string[] = [];
+        try {
+            const keywordResponse = await memoizedCallAI(
+                apiClients, selectedModel, geoTargeting, openrouterModels, selectedGroqModel,
+                'semantic_keyword_generator',
+                [page.title, geoTargeting.enabled ? geoTargeting.location : null],
+                'json'
+            );
+            const parsed = JSON.parse(keywordResponse);
+            semanticKeywords = (parsed.semanticKeywords || []).map((k: any) => typeof k === 'object' ? k.keyword : k);
+            this.logCallback(`🔑 Loaded ${semanticKeywords.length} semantic keywords`);
+        } catch (e) {
+            this.logCallback(`⚠️ Keyword fetch failed, proceeding without`);
+        }
+
+        // 6. BATCH PROCESSING WITH INTELLIGENT CACHING
+        const BATCH_SIZE = 5; // Larger batches for efficiency
+        let changesMade = 0;
+        const MAX_NODES = 25; // Limit to avoid over-processing
+        const nodesToProcess = priorityNodes.slice(0, MAX_NODES);
+
+        for (let i = 0; i < nodesToProcess.length; i += BATCH_SIZE) {
+            const batch = nodesToProcess.slice(i, i + BATCH_SIZE);
             const batchText = batch.map(n => n.outerHTML).join('\n\n');
 
-            this.logCallback(`⚡ Optimizing Text Batch ${Math.floor(i/BATCH_SIZE) + 1}...`);
+            this.logCallback(`⚡ Batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(nodesToProcess.length/BATCH_SIZE)}`);
 
             try {
                 const improvedBatchHtml = await memoizedCallAI(
                     apiClients, selectedModel, geoTargeting, openrouterModels, selectedGroqModel,
-                    'dom_content_polisher', 
-                    [batchText, [page.title]], 
+                    'dom_content_polisher',
+                    [batchText, semanticKeywords],
                     'html'
                 );
 
                 const cleanBatch = surgicalSanitizer(improvedBatchHtml);
-                
-                if (cleanBatch && cleanBatch.length > 10) {
+
+                // VALIDATION: Only apply if structure matches
+                if (cleanBatch && cleanBatch.length > 20) {
                     const tempDiv = document.createElement('div');
                     tempDiv.innerHTML = cleanBatch;
-                    
+
                     if (tempDiv.childElementCount === batch.length) {
                         batch.forEach((node, index) => {
                             const newNode = tempDiv.children[index];
                             if (newNode && node.tagName === newNode.tagName) {
-                                node.innerHTML = newNode.innerHTML;
-                                changesMade++;
+                                const oldText = node.textContent || '';
+                                const newText = newNode.textContent || '';
+
+                                // CHANGE DETECTION: Only update if meaningful difference
+                                const changeRatio = Math.abs(newText.length - oldText.length) / Math.max(oldText.length, 1);
+                                if (changeRatio > 0.05 || oldText !== newText) { // 5% difference threshold
+                                    node.innerHTML = newNode.innerHTML;
+                                    changesMade++;
+                                }
                             }
                         });
                     }
                 }
-            } catch (e) {
-                this.logCallback(`⚠️ AI Glitch on batch. Retrying...`);
+            } catch (e: any) {
+                this.logCallback(`⚠️ Batch error: ${e.message}`);
             }
-            await delay(800);
+            await delay(600); // Rate limiting
         }
 
-        if (changesMade > 0 || schemaInjected) {
-            this.logCallback(`💾 Saving ${changesMade} surgical updates + Schema...`);
+        // 7. SMART PUBLISHING DECISION
+        const significantChanges = changesMade > 0 || schemaInjected;
+
+        if (significantChanges) {
+            this.logCallback(`💾 Publishing ${changesMade} enhancements + Schema...`);
             const updatedHtml = body.innerHTML;
 
             const publishResult = await publishItemToWordPress(
-                { 
+                {
                     id: page.id, title: page.title, type: 'refresh', status: 'generating', statusText: 'Updating',
-                    generatedContent: { 
-                        ...normalizeGeneratedContent({}, page.title), 
-                        content: updatedHtml, 
+                    generatedContent: {
+                        ...normalizeGeneratedContent({}, page.title),
+                        content: updatedHtml,
                         slug: page.slug,
-                        isFullSurgicalRewrite: true, 
-                        surgicalSnippets: undefined 
+                        isFullSurgicalRewrite: true,
+                        surgicalSnippets: undefined
                     },
-                    crawledContent: null, originalUrl: page.id 
+                    crawledContent: null, originalUrl: page.id
                 },
                 localStorage.getItem('wpPassword') || '', 'publish', fetchWordPressWithRetry, wpConfig
             );
@@ -698,12 +752,53 @@ export class MaintenanceEngine {
                 this.logCallback(`✅ SUCCESS|${page.title}|${publishResult.link || page.id}`);
                 localStorage.setItem(`sota_last_proc_${page.id}`, Date.now().toString());
             } else {
-                this.logCallback(`❌ Update Failed: ${publishResult.message}`);
+                this.logCallback(`❌ Publish failed: ${publishResult.message}`);
             }
         } else {
-            this.logCallback("🤷 Content looks good. No safe updates found.");
+            this.logCallback("✓ No actionable improvements found. Content is optimized.");
             localStorage.setItem(`sota_last_proc_${page.id}`, Date.now().toString());
         }
+    }
+
+    // 🧠 INTELLIGENT UPDATE CHECKER - Determines if content actually needs updating
+    private intelligentUpdateCheck(content: string, page: SitemapPage): { shouldUpdate: boolean, reason: string } {
+        const text = content.toLowerCase();
+        const currentYear = new Date().getFullYear();
+
+        // Check 1: Contains very recent year mentions (probably fresh)
+        if (text.includes(String(currentYear)) || text.includes(String(currentYear + 1))) {
+            const yearMentions = (text.match(new RegExp(String(currentYear), 'g')) || []).length;
+            if (yearMentions >= 2) {
+                return { shouldUpdate: false, reason: `Already ${currentYear}-fresh (${yearMentions} mentions)` };
+            }
+        }
+
+        // Check 2: Has outdated year mentions (needs update)
+        const outdatedYears = [currentYear - 1, currentYear - 2, currentYear - 3];
+        for (const year of outdatedYears) {
+            if (text.includes(String(year))) {
+                return { shouldUpdate: true, reason: `Contains outdated year ${year}` };
+            }
+        }
+
+        // Check 3: Content age priority
+        if (page.daysOld && page.daysOld > 180) {
+            return { shouldUpdate: true, reason: `Content is ${page.daysOld} days old` };
+        }
+
+        // Check 4: Missing structured data
+        if (!content.includes('application/ld+json')) {
+            return { shouldUpdate: true, reason: 'Missing schema markup' };
+        }
+
+        // Check 5: Short content (probably thin)
+        const wordCount = content.split(/\s+/).length;
+        if (wordCount < 800) {
+            return { shouldUpdate: true, reason: `Thin content (${wordCount} words)` };
+        }
+
+        // Default: Skip if nothing triggers update
+        return { shouldUpdate: false, reason: 'Content appears current and optimized' };
     }
 
     private async fetchRawContent(page: SitemapPage, wpConfig: WpConfig): Promise<string | null> {

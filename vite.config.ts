@@ -22,11 +22,16 @@ export default defineConfig(({ mode }) => {
         outDir: 'dist',
         target: 'esnext',
         rollupOptions: {
+          external: ['mermaid'],
           onwarn(warning, warn) {
             if (warning.code === 'MODULE_LEVEL_DIRECTIVE') return;
+            if (warning.code === 'UNRESOLVED_IMPORT' && warning.message.includes('mermaid')) return;
             warn(warning);
           }
         }
+      },
+      optimizeDeps: {
+        include: ['mermaid']
       }
     };
 });
