@@ -283,6 +283,31 @@ export const generateImageWithFallback = async (apiClients: ApiClients, prompt: 
 // 3. WP PUBLISHING & LAYERING
 async function attemptDirectWordPressUpload(image: any, wpConfig: WpConfig, password: string): Promise<{ url: string, id: number } | null> {
     try {
+        // Validate base64 data format
+        if (!image.base64Data || typeof image.base64Data !== 'string') {
+            console.error('[Image Upload] Invalid base64Data: not a string');
+            return null;
+        }
+
+        // Extract base64 content (handle both data:image/...;base64,XXX and plain base64)
+        let base64Content: string;
+        if (image.base64Data.includes(',')) {
+            const parts = image.base64Data.split(',');
+            if (parts.length < 2 || !parts[1]) {
+                console.error('[Image Upload] Invalid base64Data format: comma found but no data after it');
+                return null;
+            }
+            base64Content = parts[1];
+        } else {
+            base64Content = image.base64Data;
+        }
+
+        // Validate base64 content is not empty
+        if (!base64Content || base64Content.trim().length === 0) {
+            console.error('[Image Upload] Base64 content is empty');
+            return null;
+        }
+
         const response = await fetchWordPressWithRetry(
             `${wpConfig.url}/wp-json/wp/v2/media`,
             {
@@ -290,17 +315,29 @@ async function attemptDirectWordPressUpload(image: any, wpConfig: WpConfig, pass
                 headers: new Headers({
                     'Authorization': `Basic ${btoa(`${wpConfig.username}:${password}`)}`,
                     'Content-Type': 'image/jpeg',
-                    'Content-Disposition': `attachment; filename="${image.title}.jpg"`
+                    'Content-Disposition': `attachment; filename="${image.title || 'image'}.jpg"`
                 }),
-                body: Buffer.from(image.base64Data.split(',')[1], 'base64')
+                body: Buffer.from(base64Content, 'base64')
             }
         );
+
         if (response.ok) {
             const data = await response.json();
+            if (!data.source_url) {
+                console.error('[Image Upload] WordPress returned success but no source_url');
+                return null;
+            }
+            console.log(`[Image Upload] Success: ${data.source_url}`);
             return { url: data.source_url, id: data.id };
+        } else {
+            const errorText = await response.text();
+            console.error(`[Image Upload] WordPress API error (${response.status}): ${errorText}`);
+            return null;
         }
-    } catch (error) { }
-    return null;
+    } catch (error: any) {
+        console.error('[Image Upload] Exception:', error.message || String(error));
+        return null;
+    }
 }
 
 const processImageLayer = async (image: any, wpConfig: WpConfig, password: string): Promise<{url: string, id: number | null} | null> => {
@@ -312,18 +349,42 @@ const processImageLayer = async (image: any, wpConfig: WpConfig, password: strin
 async function criticLoop(html: string, callAI: Function, context: GenerationContext): Promise<string> {
     let currentHtml = html;
     let attempts = 0;
-    while (attempts < 1) { 
+    const MAX_ATTEMPTS = 3;
+
+    while (attempts < MAX_ATTEMPTS) {
         try {
             const critiqueJson = await memoizedCallAI(context.apiClients, context.selectedModel, context.geoTargeting, context.openrouterModels, context.selectedGroqModel, 'content_grader', [currentHtml], 'json');
             const aiRepairer = (brokenText: string) => callAI(context.apiClients, 'gemini', { enabled: false, location: '', region: '', country: '', postalCode: '' }, [], '', 'json_repair', [brokenText], 'json');
             const critique = await parseJsonWithAiRepair(critiqueJson, aiRepairer);
-            if (critique.score >= 90) break;
+
+            // If score is excellent (>= 90), content is ready
+            if (critique.score >= 90) {
+                console.log(`[Critic Loop] Content passed with score ${critique.score} on attempt ${attempts + 1}`);
+                break;
+            }
+
+            console.log(`[Critic Loop] Attempt ${attempts + 1}/${MAX_ATTEMPTS}: Score ${critique.score}, repairing...`);
+
             const repairedHtml = await memoizedCallAI(context.apiClients, context.selectedModel, context.geoTargeting, context.openrouterModels, context.selectedGroqModel, 'content_repair_agent', [currentHtml, critique.issues], 'html');
             const sanitizedRepair = surgicalSanitizer(repairedHtml);
-            if (sanitizedRepair.length > currentHtml.length * 0.5) currentHtml = sanitizedRepair;
+
+            // Only accept repair if it's substantial (not truncated)
+            if (sanitizedRepair.length > currentHtml.length * 0.5) {
+                currentHtml = sanitizedRepair;
+                console.log(`[Critic Loop] Repair accepted (${sanitizedRepair.length} chars)`);
+            } else {
+                console.log(`[Critic Loop] Repair rejected (too short: ${sanitizedRepair.length} chars)`);
+                break; // Exit if repair is insufficient
+            }
+
             attempts++;
-        } catch (e) { break; }
+        } catch (e: any) {
+            console.error(`[Critic Loop] Error on attempt ${attempts + 1}:`, e.message);
+            break;
+        }
     }
+
+    console.log(`[Critic Loop] Final content (${currentHtml.length} chars) after ${attempts} attempts`);
     return currentHtml;
 }
 

@@ -689,9 +689,14 @@ export const processInternalLinks = (content: string, availablePages: SitemapPag
     let processedContent = content;
     const placeholderRegex = /\[INTERNAL_LINK\s+slug="([^"]+)"\s+text="([^"]+)"\]/gi;
     const slugToUrlMap: Map<string, string> = new Map();
+    const titleToUrlMap: Map<string, string> = new Map();
+
     availablePages.forEach(page => {
         if (page.slug) {
             slugToUrlMap.set(page.slug.toLowerCase(), page.id);
+        }
+        if (page.title && page.id) {
+            titleToUrlMap.set(page.title.toLowerCase().trim(), page.id);
         }
     });
 
@@ -703,7 +708,36 @@ export const processInternalLinks = (content: string, availablePages: SitemapPag
         return text;
     });
 
-    // 2. Fuzzy Semantic Linking (SOTA "Domination")
+    // 2. Handle [LINK_CANDIDATE: anchor text] format (AI-generated)
+    processedContent = processedContent.replace(/\[LINK_CANDIDATE:\s*([^\]]+?)\]/gi, (match, anchorText) => {
+        const cleanAnchor = anchorText.trim();
+
+        // Try exact match first
+        let targetUrl = titleToUrlMap.get(cleanAnchor.toLowerCase());
+
+        // Try fuzzy match if exact fails
+        if (!targetUrl) {
+            const normalizedAnchor = cleanAnchor.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
+            for (const [title, url] of titleToUrlMap.entries()) {
+                const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').trim();
+                // Check if anchor is contained in title or vice versa
+                if (normalizedTitle.includes(normalizedAnchor) || normalizedAnchor.includes(normalizedTitle)) {
+                    targetUrl = url;
+                    break;
+                }
+            }
+        }
+
+        // If we found a match, create the link
+        if (targetUrl) {
+            return `<a href="${targetUrl}" class="internal-link">${cleanAnchor}</a>`;
+        }
+
+        // If no match found, return just the anchor text (remove the placeholder syntax)
+        return cleanAnchor;
+    });
+
+    // 3. Fuzzy Semantic Linking (SOTA "Domination")
     // Only if content length is substantial to avoid over-linking short snippets
     if (availablePages.length > 0 && processedContent.length > 1000) {
         // Create a map of keywords to URLs
