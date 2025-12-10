@@ -1,507 +1,540 @@
-import { fetchWithProxies } from './contentUtils';
+// ultra-sota-services.tsx
+// SOTA support services for ULTRA SOTA + God Mode
+
+import fetchWithProxies from './contentUtils';
+import type { SitemapPage } from './types';
 
 export interface CompetitorGap {
-    type: 'missing_topic' | 'outdated_data' | 'shallow_coverage' | 'missing_examples';
-    topic: string;
-    opportunity: string;
-    priority: 'high' | 'medium' | 'low';
+  type: 'missing-topic' | 'outdated-data' | 'shallow-coverage' | 'missing-examples';
+  topic: string;
+  opportunity: string;
+  priority: 'high' | 'medium' | 'low';
 }
 
 export interface GapAnalysisResult {
-    gaps: CompetitorGap[];
-    competitorKeywords: string[];
-    missingKeywords: string[];
+  gaps: CompetitorGap[];
+  competitorKeywords: string[];
+  missingKeywords: string[];
 }
 
 export interface ValidatedReference {
-    title: string;
-    author: string;
-    url: string;
-    source: string;
-    year: number;
-    relevance: string;
-    status?: 'valid' | 'invalid' | 'checking';
-    statusCode?: number;
+  title: string;
+  url: string;
+  source?: string;
+  year?: number;
+  relevance?: 'high' | 'medium' | 'low';
+  status?: 'valid' | 'invalid' | 'checking';
+  statusCode?: number;
+  description?: string;
 }
 
 export interface InternalLinkSuggestion {
-    anchorText: string;
-    targetSlug: string;
-    context: string;
-    placement: string;
+  anchorText: string;
+  targetSlug: string;
+  context: string;
+  placement: 'intro' | 'body' | 'faq' | 'conclusion';
 }
 
+/**
+ * Competitor gap analysis using SERP + model.
+ */
 export async function performCompetitorGapAnalysis(
-    keyword: string,
-    serpData: any[],
-    aiClient: any,
-    model: string
+  keyword: string,
+  serpData: any,
+  aiClient: any,
+  model: string
 ): Promise<GapAnalysisResult> {
-    try {
-        console.log('[SOTA Gap Analysis] Analyzing competitors...');
+  try {
+    const topResults = Array.isArray(serpData?.organic)
+      ? serpData.organic.slice(0, 5)
+      : [];
 
-        const systemPrompt = `You are a Competitive Intelligence Analyst specialized in content gap analysis.
+    const serpSummary = topResults
+      .map(
+        (r: any, i: number) =>
+          `${i + 1}. ${r.title}\n   URL: ${r.link}\n   Snippet: ${r.snippet || ''}`
+      )
+      .join('\n\n');
 
-**MISSION:** Analyze top 3 competitor articles and identify:
-1. Topics they cover (but we should cover better)
-2. Topics they miss entirely
-3. Outdated information we can update
-4. Shallow explanations we can deepen
-5. Missing examples/data we can add
+    const systemPrompt = `
+You are a competitive intelligence analyst for SEO content.
 
-**OUTPUT FORMAT:**
-Return ONLY valid JSON (no markdown):
+Your job:
+- Read the top competitor snippets.
+- Identify what they all cover.
+- Then identify what they consistently miss, gloss over, or keep vague.
+`.trim();
+
+    const userPrompt = `
+PRIMARY KEYWORD: ${keyword}
+
+COMPETITOR SERP SNIPPETS:
+${serpSummary || 'No SERP data available.'}
+
+TASKS:
+1) List 5–12 specific content gaps we can exploit:
+   - Missing subtopics
+   - Outdated statistics or years
+   - Superficial explanations we can deepen
+   - Absent real-world examples or use cases
+
+2) Extract 15–30 competitor‑aligned semantic keywords.
+
+3) Extract 10–20 missing but highly relevant keywords we should add.
+
+Return STRICT JSON ONLY:
 {
   "gaps": [
     {
-      "type": "missing_topic",
-      "topic": "Specific topic",
-      "opportunity": "How we capitalize",
-      "priority": "high"
+      "type": "missing-topic" | "outdated-data" | "shallow-coverage" | "missing-examples",
+      "topic": "short phrase",
+      "opportunity": "1–2 sentence explanation of how we can outperform them",
+      "priority": "high" | "medium" | "low"
     }
   ],
-  "competitorKeywords": ["keyword1", "keyword2"],
-  "missingKeywords": ["keyword1", "keyword2"]
-}`;
+  "competitorKeywords": ["..."],
+  "missingKeywords": ["..."]
+}
+`.trim();
 
-        const userPrompt = `**TARGET KEYWORD:** ${keyword}
+    const responseText = await callStructuredModel(aiClient, model, systemPrompt, userPrompt);
+    const parsed = safeJsonParse<GapAnalysisResult>(responseText, {
+      gaps: [],
+      competitorKeywords: [],
+      missingKeywords: [],
+    });
 
-**TOP 3 COMPETITORS:**
-${serpData.slice(0, 3).map((item, i) => `
-${i + 1}. ${item.title}
-   Snippet: ${item.snippet || 'N/A'}
-`).join('\n')}
-
-Analyze and return JSON with gaps, competitor keywords, and missing keywords.`;
-
-        let responseText = '';
-
-        if (model.includes('gemini')) {
-            const result = await aiClient.generateContent({
-                contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
-            });
-            responseText = result.response.text();
-        } else if (model.includes('gpt')) {
-            const completion = await aiClient.chat.completions.create({
-                model: model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-            });
-            responseText = completion.choices[0].message.content || '';
-        } else {
-            const message = await aiClient.messages.create({
-                model: model,
-                max_tokens: 4000,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: userPrompt }],
-            });
-            responseText = message.content[0].text;
-        }
-
-        const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(cleaned);
-
-        console.log('[SOTA Gap Analysis] Found', parsed.gaps?.length || 0, 'gaps');
-
-        return {
-            gaps: parsed.gaps || [],
-            competitorKeywords: parsed.competitorKeywords || [],
-            missingKeywords: parsed.missingKeywords || []
-        };
-
-    } catch (error) {
-        console.error('[SOTA Gap Analysis] Error:', error);
-        return {
-            gaps: [],
-            competitorKeywords: [],
-            missingKeywords: []
-        };
-    }
+    return {
+      gaps: parsed.gaps || [],
+      competitorKeywords: parsed.competitorKeywords || [],
+      missingKeywords: parsed.missingKeywords || [],
+    };
+  } catch (error) {
+    console.error('SOTA Gap Analysis Error', error);
+    return {
+      gaps: [],
+      competitorKeywords: [],
+      missingKeywords: [],
+    };
+  }
 }
 
-export async function generateAndValidateReferences(
-    keyword: string,
-    contentSummary: string,
-    serperApiKey: string,
-    aiClient: any,
-    model: string,
-    onProgress?: (message: string) => void
-): Promise<ValidatedReference[]> {
+/**
+ * Semantic keyword expansion (optionally using NeuronWriter data).
+ */
+export async function enhanceSemanticKeywords(
+  primaryKeyword: string,
+  neuronData: string | null,
+  aiClient: any,
+  model: string
+): Promise<string[]> {
+  const baseList: string[] = [];
+
+  if (neuronData) {
     try {
-        console.log('[SOTA References] Generating references...');
-        onProgress?.('🔍 Generating authoritative references...');
+      const parsed = JSON.parse(neuronData);
+      if (Array.isArray(parsed?.keywords)) {
+        baseList.push(...parsed.keywords.slice(0, 50));
+      }
+    } catch {
+      // ignore neuron parsing issues, fall back to model-only
+    }
+  }
 
-        const currentYear = new Date().getFullYear();
+  const systemPrompt = `
+You are an on-page SEO strategist.
 
-        const systemPrompt = `You are a Reference Validation Specialist.
+Generate semantic keywords that help a long-form article about the topic
+achieve topical authority and match real user intent.
+`.trim();
 
-Generate high-quality, verifiable, TOPIC-SPECIFIC references.
+  const userPrompt = `
+PRIMARY KEYWORD: ${primaryKeyword}
 
-**CRITICAL REQUIREMENTS:**
-1. References MUST be DIRECTLY RELEVANT to the specific topic (not generic)
-2. Each reference must be from an AUTHORITATIVE source (.edu, .gov, major publications, research institutions)
-3. References must be RECENT (${currentYear} preferred)
-4. References must have REAL, VERIFIABLE URLs
-5. Each reference should be UNIQUE to this topic (would NOT fit a different topic)
+OPTIONAL EXISTING KEYWORDS:
+${baseList.length ? baseList.join(', ') : 'None'}
 
-**WHAT TO AVOID:**
-❌ Generic content marketing/SEO/blogging advice
-❌ References that could apply to ANY topic
-❌ Low-authority blog posts
-❌ Made-up or hallucinated URLs
-❌ Outdated sources (pre-2023)
+TASK:
+Return 30–60 additional, distinct semantic keywords and entities related to this topic.
+Mix:
+- question-style phrases
+- problem/solution phrases
+- entities (brands, tools, frameworks, locations if relevant)
 
-**OUTPUT FORMAT (JSON only):**
+Return STRICT JSON ONLY:
+{
+  "keywords": ["...", "..."]
+}
+`.trim();
+
+  try {
+    const responseText = await callStructuredModel(aiClient, model, systemPrompt, userPrompt);
+    const parsed = safeJsonParse<{ keywords: string[] }>(responseText, { keywords: [] });
+
+    const combined = [...baseList, ...(parsed.keywords || [])]
+      .map((k) => k.trim())
+      .filter(Boolean);
+
+    // De-duplicate, keep order
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const kw of combined) {
+      const lower = kw.toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        unique.push(kw);
+      }
+    }
+    return unique;
+  } catch (error) {
+    console.error('SOTA Semantic Keyword Error', error);
+    return baseList.length ? baseList : [primaryKeyword];
+  }
+}
+
+/**
+ * Dynamic reference discovery + validation using Serper and the model.
+ */
+export async function generateAndValidateReferences(
+  keyword: string,
+  contentSummary: string,
+  serperApiKey: string,
+  aiClient: any,
+  model: string,
+  onProgress?: (msg: string) => void
+): Promise<ValidatedReference[]> {
+  onProgress?.('Searching for authoritative sources…');
+
+  let serpResults: any[] = [];
+  if (serperApiKey) {
+    try {
+      const response = await fetchWithProxies('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: {
+          'X-API-KEY': serperApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          q: `${keyword} ${new Date().getFullYear()} research data official`,
+          num: 20,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        serpResults = Array.isArray(data.organic) ? data.organic : [];
+        onProgress?.(`Found ${serpResults.length} candidate sources…`);
+      }
+    } catch (error) {
+      console.error('Serper reference search failed', error);
+    }
+  }
+
+  const searchDump = serpResults
+    .slice(0, 15)
+    .map(
+      (r: any, i: number) =>
+        `${i + 1}. ${r.title}\n   URL: ${r.link}\n   Snippet: ${r.snippet || ''}`
+    )
+    .join('\n\n');
+
+  const systemPrompt = `
+You are a research librarian.
+
+Your job:
+- Choose only the best, most relevant sources.
+- Prefer primary or highly reputable references over generic blogs.
+`.trim();
+
+  const userPrompt = `
+TOPIC: ${keyword}
+CONTENT SUMMARY:
+${contentSummary}
+
+CANDIDATE SEARCH RESULTS:
+${searchDump || 'None.'}
+
+TASK:
+Select the 8–12 strongest references for this article.
+
+Rules:
+- Prefer .gov, .edu, and major institutions or well-known products/vendors.
+- Ensure each chosen source clearly supports some part of the topic.
+- Prefer recent material (${new Date().getFullYear() - 2}–${new Date().getFullYear()}), unless a classic resource is still canonical.
+
+Return STRICT JSON ONLY:
 {
   "references": [
     {
-      "title": "Specific citation title (must be topic-specific)",
-      "author": "Author/Organization",
-      "url": "https://real-verifiable-url.com",
-      "source": "Publication name (.edu, .gov, major publication)",
-      "year": ${currentYear},
-      "relevance": "Why this is directly relevant to THIS SPECIFIC topic"
+      "title": "Exact title",
+      "url": "https://...",
+      "source": "Organization or site name",
+      "year": 2025,
+      "relevance": "high" | "medium",
+      "description": "1-sentence explanation of what this source is useful for"
     }
   ]
-}`;
-
-        const userPrompt = `**TOPIC:** ${keyword}
-
-**CONTENT SUMMARY:** ${contentSummary.substring(0, 500)}
-
-**TASK:**
-Generate 8-12 authoritative, TOPIC-SPECIFIC references for the topic "${keyword}".
-
-**CRITICAL RULES:**
-1. Each reference MUST be specifically about "${keyword}" (not generic content/SEO advice)
-2. Use ONLY authoritative sources (.edu, .gov, research institutions, major publications)
-3. References must be from ${currentYear} or ${currentYear - 1}
-4. Each reference should be UNIQUE to this topic
-5. Provide REAL, VERIFIABLE URLs only
-
-**BAD EXAMPLES (DO NOT USE):**
-- "Content Marketing Institute - How to Write Better Content" (too generic)
-- "HubSpot Blog - SEO Best Practices" (not specific to topic)
-- Generic marketing blogs or low-authority sources
-
-**GOOD EXAMPLES (FORMAT TO FOLLOW):**
-- Topic-specific academic papers, research studies, government reports
-- Industry-specific publications and authoritative sources
-- Expert organizations directly related to the topic
-
-Return ONLY valid JSON with 8-12 references.`;
-
-        let responseText = '';
-
-        if (model.includes('gemini')) {
-            const result = await aiClient.generateContent({
-                contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
-            });
-            responseText = result.response.text();
-        } else if (model.includes('gpt')) {
-            const completion = await aiClient.chat.completions.create({
-                model: model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-            });
-            responseText = completion.choices[0].message.content || '';
-        } else {
-            const message = await aiClient.messages.create({
-                model: model,
-                max_tokens: 4000,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: userPrompt }],
-            });
-            responseText = message.content[0].text;
-        }
-
-        const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(cleaned);
-
-        let references: ValidatedReference[] = parsed.references || [];
-
-        console.log('[SOTA References] Validating', references.length, 'references...');
-        onProgress?.(`✅ Validating ${references.length} references...`);
-
-        const validatedReferences = await Promise.all(
-            references.map(async (ref) => {
-                try {
-                    if (!serperApiKey) {
-                        return { ...ref, status: 'valid' as const, statusCode: 200 };
-                    }
-
-                    const searchQuery = `"${ref.title}" ${ref.source}`;
-                    const response = await fetchWithProxies('https://google.serper.dev/search', {
-                        method: 'POST',
-                        headers: {
-                            'X-API-Key': serperApiKey,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ q: searchQuery, num: 3 })
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        const results = data.organic || [];
-
-                        if (results.length > 0) {
-                            const topResult = results[0];
-                            return {
-                                ...ref,
-                                url: topResult.link || ref.url,
-                                status: 'valid' as const,
-                                statusCode: 200
-                            };
-                        }
-                    }
-
-                    return { ...ref, status: 'valid' as const, statusCode: 200 };
-
-                } catch (error) {
-                    console.warn('[SOTA References] Validation failed for:', ref.title);
-                    return { ...ref, status: 'valid' as const, statusCode: 200 };
-                }
-            })
-        );
-
-        const validRefs = validatedReferences.filter(r => r.status === 'valid');
-        console.log('[SOTA References] Validated', validRefs.length, 'valid references');
-        onProgress?.(`✅ Validated ${validRefs.length} authoritative references`);
-
-        return validRefs;
-
-    } catch (error) {
-        console.error('[SOTA References] Error:', error);
-        return [];
-    }
 }
+`.trim();
 
-export function generateReferencesHtml(references: ValidatedReference[]): string {
-    if (references.length === 0) return '';
-
-    const currentYear = new Date().getFullYear();
-
-    const referencesHtml = `
-<div class="references-section" style="margin: 4rem 0 2rem 0; padding: 2.5rem; background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%); border-radius: 16px; border-top: 4px solid #3b82f6;">
-    <h2 style="margin: 0 0 1.5rem 0; font-family: 'Montserrat', system-ui, sans-serif; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 0.8rem; font-size: 1.8rem;">
-        <span style="color: #3b82f6; font-size: 2rem;">📚</span>
-        References & Sources
-    </h2>
-    <p style="color: #475569; margin-bottom: 2rem; line-height: 1.6; font-size: 1rem;">
-        All information has been verified against authoritative sources. These references ensure accuracy and trustworthiness.
-    </p>
-    <ol style="list-style: none; counter-reset: ref-counter; padding: 0; margin: 0;">
-        ${references.map((ref, index) => `
-        <li style="counter-increment: ref-counter; margin-bottom: 1.5rem; padding: 1.5rem; background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 4px solid #3b82f6; position: relative;">
-            <div style="display: flex; gap: 1rem;">
-                <span style="flex-shrink: 0; width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem;">
-                    ${index + 1}
-                </span>
-                <div style="flex: 1;">
-                    <div style="font-weight: 700; color: #1e293b; margin-bottom: 0.5rem; font-size: 1.05rem;">
-                        ${ref.title}
-                    </div>
-                    <div style="color: #64748b; font-size: 0.9rem; margin-bottom: 0.5rem;">
-                        <strong>${ref.author}</strong> • ${ref.source} • ${ref.year}
-                    </div>
-                    <div style="color: #475569; font-size: 0.85rem; font-style: italic; margin-bottom: 0.8rem;">
-                        ${ref.relevance}
-                    </div>
-                    <a href="${ref.url}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.4rem; color: #3b82f6; text-decoration: none; font-size: 0.9rem; font-weight: 600; transition: color 0.2s;">
-                        <span>View Source</span>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                            <polyline points="15 3 21 3 21 9"></polyline>
-                            <line x1="10" y1="14" x2="21" y2="3"></line>
-                        </svg>
-                    </a>
-                </div>
-            </div>
-        </li>
-        `).join('')}
-    </ol>
-    <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(59, 130, 246, 0.05); border-radius: 12px; border: 2px dashed #3b82f6;">
-        <p style="margin: 0; color: #475569; font-size: 0.9rem; line-height: 1.6;">
-            <strong style="color: #1e293b;">✓ Verification Status:</strong> All references have been validated for accuracy and accessibility as of ${currentYear}.
-            We prioritize peer-reviewed sources, government publications, and authoritative industry leaders.
-        </p>
-    </div>
-</div>`;
-
-    return referencesHtml;
-}
-
-export async function enhanceSemanticKeywords(
-    primaryKeyword: string,
-    location: string | null,
-    aiClient: any,
-    model: string
-): Promise<string[]> {
-    try {
-        console.log('[SOTA Semantic] Generating enhanced keyword map...');
-
-        const systemPrompt = `You are an Advanced SEO Entity & Semantic Keyword Generator.
-
-Generate comprehensive semantic keywords for topical authority.
-
-**CATEGORIES:**
-1. Primary variations (synonyms)
-2. LSI keywords
-3. Entities (people, places, concepts)
-4. Question keywords
-5. Comparison keywords
-6. Commercial keywords
-
-**OUTPUT FORMAT (JSON only):**
-{
-  "keywords": ["keyword1", "keyword2", ...]
-}
-
-Return 30-50 keywords total.`;
-
-        const userPrompt = `**PRIMARY KEYWORD:** ${primaryKeyword}
-${location ? `**LOCATION:** ${location}` : ''}
-
-Generate comprehensive semantic keyword map.
-Return ONLY valid JSON.`;
-
-        let responseText = '';
-
-        if (model.includes('gemini')) {
-            const result = await aiClient.generateContent({
-                contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
-            });
-            responseText = result.response.text();
-        } else if (model.includes('gpt')) {
-            const completion = await aiClient.chat.completions.create({
-                model: model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt }
-                ],
-            });
-            responseText = completion.choices[0].message.content || '';
-        } else {
-            const message = await aiClient.messages.create({
-                model: model,
-                max_tokens: 2000,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: userPrompt }],
-            });
-            responseText = message.content[0].text;
-        }
-
-        const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(cleaned);
-
-        console.log('[SOTA Semantic] Generated', parsed.keywords?.length || 0, 'keywords');
-
-        return parsed.keywords || [];
-
-    } catch (error) {
-        console.error('[SOTA Semantic] Error:', error);
-        return [];
-    }
-}
-
-export function extractExistingImages(htmlContent: string): string[] {
-    const images: string[] = [];
-    const imgRegex = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
-    const iframeRegex = /<iframe[^>]+src=["']([^"']+)["'][^>]*>/gi;
-
-    let match;
-    while ((match = imgRegex.exec(htmlContent)) !== null) {
-        images.push(match[0]);
-    }
-
-    while ((match = iframeRegex.exec(htmlContent)) !== null) {
-        if (match[1].includes('youtube.com') || match[1].includes('youtu.be')) {
-            images.push(match[0]);
-        }
-    }
-
-    console.log('[SOTA Images] Extracted', images.length, 'existing images/videos');
-    return images;
-}
-
-export function injectImagesIntoContent(content: string, existingImages: string[]): string {
-    if (existingImages.length === 0) return content;
-
-    let processedContent = content;
-    const paragraphs = content.split('</p>');
-
-    let imageIndex = 0;
-    existingImages.forEach((image, idx) => {
-        const placeholderPosition = Math.floor(paragraphs.length / (existingImages.length + 1)) * (idx + 1);
-
-        if (placeholderPosition < paragraphs.length) {
-            const wrappedImage = `<figure class="wp-block-image">${image}</figure>`;
-            paragraphs.splice(placeholderPosition, 0, wrappedImage);
-        }
+  let selectedRefs: ValidatedReference[] = [];
+  try {
+    const responseText = await callStructuredModel(aiClient, model, systemPrompt, userPrompt);
+    const parsed = safeJsonParse<{ references: ValidatedReference[] }>(responseText, {
+      references: [],
     });
+    selectedRefs = parsed.references || [];
+    onProgress?.(`Selected ${selectedRefs.length} candidate references…`);
+  } catch (error) {
+    console.error('Reference selection error', error);
+  }
 
-    processedContent = paragraphs.join('</p>');
+  // HEAD-check / GET-validate URLs
+  const validated: ValidatedReference[] = [];
+  for (const ref of selectedRefs) {
+    if (!ref.url) continue;
 
-    console.log('[SOTA Images] Reinjected', existingImages.length, 'images into content');
-    return processedContent;
+    try {
+      const res = await fetchWithProxies(ref.url, { method: 'HEAD', redirect: 'follow' });
+
+      if (res.ok || res.status === 405 || res.status === 403) {
+        validated.push({
+          ...ref,
+          status: 'valid',
+          statusCode: res.status,
+        });
+      }
+    } catch {
+      // Try a lightweight GET as a fallback
+      try {
+        const res = await fetchWithProxies(ref.url, {
+          method: 'GET',
+          redirect: 'follow',
+        });
+        if (res.ok) {
+          validated.push({
+            ...ref,
+            status: 'valid',
+            statusCode: res.status,
+          });
+        }
+      } catch {
+        // ignore invalid
+      }
+    }
+  }
+
+  onProgress?.(`Validated ${validated.length} working references.`);
+  return validated.slice(0, 12);
 }
 
-export async function generateOptimalInternalLinks(
-    contentOutline: any,
-    availablePages: any[],
-    targetCount: number = 10
-): Promise<InternalLinkSuggestion[]> {
-    try {
-        console.log('[SOTA Internal Links] Generating optimal link suggestions...');
+/**
+ * Render references into a styled HTML block at the end of the article.
+ */
+export function generateReferencesHtml(references: ValidatedReference[]): string {
+  if (!references.length) return '';
 
-        const links: InternalLinkSuggestion[] = [];
+  const year = new Date().getFullYear();
 
-        const outlineText = JSON.stringify(contentOutline);
-        const titleWords = contentOutline.title?.toLowerCase().split(' ') || [];
+  const items = references
+    .map((ref) => {
+      const safeTitle = escapeHtml(ref.title || ref.url);
+      const safeUrl = escapeHtml(ref.url);
+      const safeSource = escapeHtml(ref.source || '');
+      const safeDesc = escapeHtml(ref.description || '');
+      const yearLabel = ref.year || year;
 
-        availablePages.forEach(page => {
-            if (links.length >= targetCount) return;
+      return `
+      <li class="reference-item">
+        <a href="${safeUrl}" rel="noopener noreferrer" target="_blank">
+          <span class="reference-title">${safeTitle}</span>
+        </a>
+        ${safeSource ? `<span class="reference-source"> – ${safeSource}</span>` : ''}
+        <span class="reference-meta"> (${yearLabel})</span>
+        ${safeDesc ? `<div class="reference-desc">${safeDesc}</div>` : ''}
+      </li>`.trim();
+    })
+    .join('\n');
 
-            const pageWords = page.title.toLowerCase().split(' ');
-            const commonWords = titleWords.filter(word =>
-                pageWords.includes(word) && word.length > 3
-            );
+  return `
+<section class="references">
+  <h2>References</h2>
+  <p>These sources were selected for relevance, authority, and recency for this topic.</p>
+  <ol class="reference-list">
+    ${items}
+  </ol>
+</section>
+`.trim();
+}
 
-            if (commonWords.length >= 2) {
-                links.push({
-                    anchorText: page.title,
-                    targetSlug: page.slug,
-                    context: `Related to ${commonWords.join(', ')}`,
-                    placement: 'Body section'
-                });
-            }
-        });
+/**
+ * Extract existing <img> and YouTube <iframe> tags from a chunk of HTML.
+ */
+export function extractExistingImages(htmlContent: string): string[] {
+  if (!htmlContent) return [];
+  const images: string[] = [];
 
-        if (links.length < targetCount) {
-            const remainingSlots = targetCount - links.length;
-            const additionalPages = availablePages
-                .filter(p => !links.some(l => l.targetSlug === p.slug))
-                .slice(0, remainingSlots);
+  const imgRegex = /<img[^>]*src=["']?([^"'>\s]+)[^>]*>/gi;
+  const iframeRegex = /<iframe[^>]*src=["']?([^"'>\s]+)[^>]*><\/iframe>/gi;
 
-            additionalPages.forEach(page => {
-                links.push({
-                    anchorText: page.title,
-                    targetSlug: page.slug,
-                    context: 'Contextually relevant',
-                    placement: 'Body section'
-                });
-            });
-        }
+  let match: RegExpExecArray | null;
+  while ((match = imgRegex.exec(htmlContent)) !== null) {
+    images.push(match[0]);
+  }
 
-        console.log('[SOTA Internal Links] Generated', links.length, 'link suggestions');
-        return links.slice(0, targetCount);
-
-    } catch (error) {
-        console.error('[SOTA Internal Links] Error:', error);
-        return [];
+  while ((match = iframeRegex.exec(htmlContent)) !== null) {
+    const src = match[1] || '';
+    if (src.includes('youtube.com') || src.includes('youtu.be')) {
+      images.push(match[0]);
     }
+  }
+
+  return images;
+}
+
+/**
+ * Re-inject preserved images into refreshed content at natural breakpoints.
+ */
+export function injectImagesIntoContent(
+  content: string,
+  existingImages: string[]
+): string {
+  if (!existingImages.length) return content;
+
+  const paragraphs = content.split(/(<\/p>)/i);
+  if (paragraphs.length < 3) {
+    return `${existingImages.join('\n')}\n\n${content}`;
+  }
+
+  const injected: string[] = [];
+  let imageIndex = 0;
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    injected.push(paragraphs[i]);
+
+    const isParagraphClose = paragraphs[i].toLowerCase() === '</p>';
+    const isGoodSpot = i > 2 && i % 4 === 0;
+
+    if (isParagraphClose && isGoodSpot && imageIndex < existingImages.length) {
+      injected.push(`\n${existingImages[imageIndex++]}\n`);
+    }
+  }
+
+  // If we still have images left, append them at the end
+  while (imageIndex < existingImages.length) {
+    injected.push(`\n${existingImages[imageIndex++]}\n`);
+  }
+
+  return injected.join('');
+}
+
+/**
+ * Generate internal link suggestions based on existing pages.
+ */
+export function generateOptimalInternalLinks(
+  content: string,
+  existingPages: SitemapPage[],
+  targetCount: number
+): InternalLinkSuggestion[] {
+  if (!existingPages.length || targetCount <= 0) return [];
+
+  const suggestions: InternalLinkSuggestion[] = [];
+  const bodyText = content.replace(/<[^>]+>/g, ' ').toLowerCase();
+
+  for (const page of existingPages) {
+    if (!page.title || !page.slug) continue;
+
+    const keywords = page.title
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+      .slice(0, 4);
+
+    const anchor = keywords.join(' ');
+    if (!anchor) continue;
+
+    if (bodyText.includes(anchor.toLowerCase())) {
+      suggestions.push({
+        anchorText: anchor,
+        targetSlug: `/${page.slug}`,
+        context: 'Body reference to related guide',
+        placement: 'body',
+      });
+    }
+
+    if (suggestions.length >= targetCount) break;
+  }
+
+  return suggestions;
+}
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+async function callStructuredModel(
+  aiClient: any,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string> {
+  // Gemini simple mode:
+  if (model.toLowerCase().includes('gemini')) {
+    const result = await aiClient.generateContent({
+      contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
+    });
+    return result.response.text();
+  }
+
+  // OpenAI-style:
+  if (aiClient.chat?.completions) {
+    const completion = await aiClient.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: 2000,
+      temperature: 0.2,
+    });
+    return completion.choices[0]?.message?.content ?? '';
+  }
+
+  // Anthropic-style:
+  const message = await aiClient.messages.create({
+    model,
+    max_tokens: 2000,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+    temperature: 0.2,
+  });
+
+  const first = message.content?.[0];
+  // @ts-ignore
+  return typeof first === 'string' ? first : first?.text ?? '';
+}
+
+function safeJsonParse<T>(input: string, fallback: T): T {
+  if (!input || typeof input !== 'string') return fallback;
+
+  try {
+    // Try plain parse first
+    return JSON.parse(input) as T;
+  } catch {
+    // Try to extract the first {...} block
+    const match = input.match(/\{[\s\S]*\}/);
+    if (!match) return fallback;
+    try {
+      return JSON.parse(match[0]) as T;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
