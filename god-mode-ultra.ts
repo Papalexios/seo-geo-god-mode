@@ -735,149 +735,150 @@ Generate comprehensive AI visibility optimization JSON.
 Return ONLY HTML.
 `;
     }
-  };
+  }
+};
 
-  export const GodModeUltraEngine = {
-    async fetchCompetitorContent(keyword: string, serperApiKey: string): Promise<{ competitor1: string; competitor2: string; competitor3: string; paaQuestions: string[] }> {
-      if (!serperApiKey) {
-        return { competitor1: '', competitor2: '', competitor3: '', paaQuestions: [] };
-      }
+export const GodModeUltraEngine = {
+  async fetchCompetitorContent(keyword: string, serperApiKey: string): Promise<{ competitor1: string; competitor2: string; competitor3: string; paaQuestions: string[] }> {
+    if (!serperApiKey) {
+      return { competitor1: '', competitor2: '', competitor3: '', paaQuestions: [] };
+    }
 
-      try {
-        const response = await fetch("https://google.serper.dev/search", {
-          method: 'POST',
-          headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: keyword, num: 10 })
-        });
+    try {
+      const response = await fetch("https://google.serper.dev/search", {
+        method: 'POST',
+        headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: keyword, num: 10 })
+      });
 
-        const data = await response.json();
-        const organic = data.organic || [];
-        const paa = data.peopleAlsoAsk || [];
+      const data = await response.json();
+      const organic = data.organic || [];
+      const paa = data.peopleAlsoAsk || [];
 
-        const competitors = organic.slice(0, 3).map((result: any) => {
-          const sitelinks = result.sitelinks?.map((s: any) => s.title).join(', ') || '';
-          return `
+      const competitors = organic.slice(0, 3).map((result: any) => {
+        const sitelinks = result.sitelinks?.map((s: any) => s.title).join(', ') || '';
+        return `
 TITLE: ${result.title}
 URL: ${result.link}
 SNIPPET: ${result.snippet}
 ${sitelinks ? `SUBTOPICS: ${sitelinks}` : ''}
                 `.trim();
+      });
+
+      return {
+        competitor1: competitors[0] || '',
+        competitor2: competitors[1] || '',
+        competitor3: competitors[2] || '',
+        paaQuestions: paa.map((p: any) => p.question).slice(0, 8)
+      };
+    } catch (e) {
+      console.error('[GodModeUltra] Competitor fetch error:', e);
+      return { competitor1: '', competitor2: '', competitor3: '', paaQuestions: [] };
+    }
+  },
+
+  async fetchDynamicReferences(keyword: string, sectionTopics: string[], serperApiKey: string, wpUrl?: string): Promise<Map<string, DynamicReference[]>> {
+    const referenceMap = new Map<string, DynamicReference[]>();
+
+    if (!serperApiKey) return referenceMap;
+
+    const AUTHORITY_DOMAINS = {
+      government: ['.gov', '.edu', 'who.int', 'europa.eu', 'nih.gov', 'cdc.gov', 'fda.gov'],
+      academic: ['nature.com', 'sciencedirect.com', 'springer.com', 'wiley.com', 'pubmed', 'arxiv.org', 'jstor.org'],
+      industry: ['gartner.com', 'mckinsey.com', 'hbr.org', 'forbes.com', 'bloomberg.com', 'reuters.com', 'statista.com'],
+      expert: ['techcrunch.com', 'wired.com', 'arstechnica.com', 'theverge.com']
+    };
+
+    const BLOCKED_DOMAINS = [
+      'quora.com', 'reddit.com', 'pinterest.com', 'facebook.com', 'twitter.com',
+      'youtube.com', 'tiktok.com', 'instagram.com', 'linkedin.com', 'medium.com',
+      'scribd.com', 'slideshare.net', 'academia.edu', 'researchgate.net'
+    ];
+
+    for (const section of sectionTopics.slice(0, 6)) {
+      const sectionQuery = `${section} ${keyword} research statistics data ${TARGET_YEAR} -site:quora.com -site:reddit.com -site:pinterest.com`;
+
+      try {
+        const response = await fetch("https://google.serper.dev/search", {
+          method: 'POST',
+          headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: sectionQuery, num: 10 })
         });
 
-        return {
-          competitor1: competitors[0] || '',
-          competitor2: competitors[1] || '',
-          competitor3: competitors[2] || '',
-          paaQuestions: paa.map((p: any) => p.question).slice(0, 8)
-        };
-      } catch (e) {
-        console.error('[GodModeUltra] Competitor fetch error:', e);
-        return { competitor1: '', competitor2: '', competitor3: '', paaQuestions: [] };
-      }
-    },
+        const data = await response.json();
+        const results = (data.organic || []).slice(0, 8);
 
-    async fetchDynamicReferences(keyword: string, sectionTopics: string[], serperApiKey: string, wpUrl?: string): Promise<Map<string, DynamicReference[]>> {
-      const referenceMap = new Map<string, DynamicReference[]>();
+        const sectionRefs: DynamicReference[] = [];
 
-      if (!serperApiKey) return referenceMap;
+        for (const result of results) {
+          try {
+            const domain = new URL(result.link).hostname.replace('www.', '');
 
-      const AUTHORITY_DOMAINS = {
-        government: ['.gov', '.edu', 'who.int', 'europa.eu', 'nih.gov', 'cdc.gov', 'fda.gov'],
-        academic: ['nature.com', 'sciencedirect.com', 'springer.com', 'wiley.com', 'pubmed', 'arxiv.org', 'jstor.org'],
-        industry: ['gartner.com', 'mckinsey.com', 'hbr.org', 'forbes.com', 'bloomberg.com', 'reuters.com', 'statista.com'],
-        expert: ['techcrunch.com', 'wired.com', 'arstechnica.com', 'theverge.com']
-      };
+            if (BLOCKED_DOMAINS.some(blocked => domain.includes(blocked))) continue;
+            if (wpUrl && domain.includes(new URL(wpUrl).hostname.replace('www.', ''))) continue;
 
-      const BLOCKED_DOMAINS = [
-        'quora.com', 'reddit.com', 'pinterest.com', 'facebook.com', 'twitter.com',
-        'youtube.com', 'tiktok.com', 'instagram.com', 'linkedin.com', 'medium.com',
-        'scribd.com', 'slideshare.net', 'academia.edu', 'researchgate.net'
-      ];
+            let category: DynamicReference['category'] = 'Expert';
+            let authorityScore = 50;
 
-      for (const section of sectionTopics.slice(0, 6)) {
-        const sectionQuery = `${section} ${keyword} research statistics data ${TARGET_YEAR} -site:quora.com -site:reddit.com -site:pinterest.com`;
+            if (AUTHORITY_DOMAINS.government.some(d => domain.includes(d))) {
+              category = 'Government';
+              authorityScore = 95;
+            } else if (AUTHORITY_DOMAINS.academic.some(d => domain.includes(d))) {
+              category = 'Academic';
+              authorityScore = 90;
+            } else if (AUTHORITY_DOMAINS.industry.some(d => domain.includes(d))) {
+              category = 'Industry';
+              authorityScore = 85;
+            } else if (AUTHORITY_DOMAINS.expert.some(d => domain.includes(d))) {
+              category = 'News';
+              authorityScore = 75;
+            }
 
-        try {
-          const response = await fetch("https://google.serper.dev/search", {
-            method: 'POST',
-            headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ q: sectionQuery, num: 10 })
-          });
-
-          const data = await response.json();
-          const results = (data.organic || []).slice(0, 8);
-
-          const sectionRefs: DynamicReference[] = [];
-
-          for (const result of results) {
-            try {
-              const domain = new URL(result.link).hostname.replace('www.', '');
-
-              if (BLOCKED_DOMAINS.some(blocked => domain.includes(blocked))) continue;
-              if (wpUrl && domain.includes(new URL(wpUrl).hostname.replace('www.', ''))) continue;
-
-              let category: DynamicReference['category'] = 'Expert';
-              let authorityScore = 50;
-
-              if (AUTHORITY_DOMAINS.government.some(d => domain.includes(d))) {
-                category = 'Government';
-                authorityScore = 95;
-              } else if (AUTHORITY_DOMAINS.academic.some(d => domain.includes(d))) {
-                category = 'Academic';
-                authorityScore = 90;
-              } else if (AUTHORITY_DOMAINS.industry.some(d => domain.includes(d))) {
-                category = 'Industry';
-                authorityScore = 85;
-              } else if (AUTHORITY_DOMAINS.expert.some(d => domain.includes(d))) {
-                category = 'News';
-                authorityScore = 75;
-              }
-
-              sectionRefs.push({
-                title: result.title,
-                url: result.link,
-                domain,
-                authorityScore,
-                relevanceScore: 80,
-                publicationDate: result.date || TARGET_YEAR.toString(),
-                snippet: result.snippet || '',
-                category
-              });
-            } catch { }
-          }
-
-          sectionRefs.sort((a, b) => b.authorityScore - a.authorityScore);
-          referenceMap.set(section, sectionRefs.slice(0, 3));
-
-          await new Promise(r => setTimeout(r, 200));
-        } catch (e) {
-          console.error(`[GodModeUltra] Reference fetch error for ${section}:`, e);
+            sectionRefs.push({
+              title: result.title,
+              url: result.link,
+              domain,
+              authorityScore,
+              relevanceScore: 80,
+              publicationDate: result.date || TARGET_YEAR.toString(),
+              snippet: result.snippet || '',
+              category
+            });
+          } catch { }
         }
+
+        sectionRefs.sort((a, b) => b.authorityScore - a.authorityScore);
+        referenceMap.set(section, sectionRefs.slice(0, 3));
+
+        await new Promise(r => setTimeout(r, 200));
+      } catch (e) {
+        console.error(`[GodModeUltra] Reference fetch error for ${section}:`, e);
       }
+    }
 
-      return referenceMap;
-    },
+    return referenceMap;
+  },
 
-    generateReferencesHtml(referenceMap: Map<string, DynamicReference[]>, keyword: string): string {
-      const allRefs: DynamicReference[] = [];
-      referenceMap.forEach(refs => allRefs.push(...refs));
+  generateReferencesHtml(referenceMap: Map<string, DynamicReference[]>, keyword: string): string {
+    const allRefs: DynamicReference[] = [];
+    referenceMap.forEach(refs => allRefs.push(...refs));
 
-      const uniqueRefs = allRefs.filter((ref, index, self) =>
-        index === self.findIndex(r => r.url === ref.url)
-      ).slice(0, 10);
+    const uniqueRefs = allRefs.filter((ref, index, self) =>
+      index === self.findIndex(r => r.url === ref.url)
+    ).slice(0, 10);
 
-      if (uniqueRefs.length === 0) return '';
+    if (uniqueRefs.length === 0) return '';
 
-      const categoryIcons: Record<string, string> = {
-        'Government': '🏛️',
-        'Academic': '🎓',
-        'Industry': '📊',
-        'Research': '🔬',
-        'News': '📰',
-        'Expert': '💡'
-      };
+    const categoryIcons: Record<string, string> = {
+      'Government': '🏛️',
+      'Academic': '🎓',
+      'Industry': '📊',
+      'Research': '🔬',
+      'News': '📰',
+      'Expert': '💡'
+    };
 
-      const listItems = uniqueRefs.map(ref => `
+    const listItems = uniqueRefs.map(ref => `
             <li style="padding: 1rem; background: white; border-radius: 8px; margin-bottom: 0.75rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: transform 0.2s;">
                 <a href="${ref.url}" target="_blank" rel="noopener noreferrer" style="color: #1e40af; font-weight: 600; text-decoration: none; display: block; margin-bottom: 0.25rem;">
                     ${ref.title}
@@ -891,7 +892,7 @@ ${sitelinks ? `SUBTOPICS: ${sitelinks}` : ''}
             </li>
         `).join('');
 
-      return `
+    return `
 <div class="sota-references-section" style="margin-top: 3rem; padding: 2rem; background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); border-radius: 16px; border: 1px solid #e2e8f0;">
     <h2 style="margin-top: 0; font-size: 1.5rem; color: #0f172a; display: flex; align-items: center; gap: 0.5rem; border-bottom: 2px solid #3b82f6; padding-bottom: 0.75rem; margin-bottom: 1.5rem;">
         <span>📚</span> Research Sources & Further Reading
@@ -907,7 +908,7 @@ ${sitelinks ? `SUBTOPICS: ${sitelinks}` : ''}
     </p>
 </div>
         `.trim();
-    }
-  };
+  }
+};
 
-  export default GOD_MODE_ULTRA_PROMPTS;
+export default GOD_MODE_ULTRA_PROMPTS;
